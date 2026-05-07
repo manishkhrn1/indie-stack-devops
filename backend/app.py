@@ -3,9 +3,12 @@ from flask import Flask, jsonify
 import psycopg2
 import os
 import time
+import redis
+import json
 
 
 app = Flask(__name__)
+cache = redis.Redis(host='redis', port=6379, db=0)
 
 def get_db_connection():
     # This pulls the URL we defined in our docker-compose.yml
@@ -50,7 +53,36 @@ def update_stats():
         conn.commit()
         cur.close()
         conn.close()
-        return jsonify({"message": "Stats updated!"}), 201
+        cache.delete('top_scores') 
+        return jsonify({"message": "Stats updated and cache cleared!"}), 201
+        
+    return jsonify({"error": "Database connection failed"}), 500
+
+@app.route('/leaderboard', methods=['GET'])
+def get_leaderboard():
+    # 1. Try to get data from Redis cache first
+    cached_leaderboard = cache.get('top_scores')
+    
+    if cached_leaderboard:
+        print("Coming from Cache!")
+        return jsonify(json.loads(cached_leaderboard)), 200
+
+    # 2. If not in cache, go to PostgreSQL (Your existing logic)
+    print("Coming from Database!")
+    conn = get_db_connection()
+    if conn:
+        cur = conn.cursor()
+        cur.execute("SELECT player_name, score, level FROM player_stats ORDER BY score DESC LIMIT 10")
+        rows = cur.fetchall()
+        cur.close()
+        conn.close()
+        
+        leaderboard_data = [{"player_name": row[0], "score": row[1], "level": row[2]} for row in rows]
+        
+        # 3. Store the result in Redis for 60 seconds so the next person gets it instantly
+        cache.setex('top_scores', 60, json.dumps(leaderboard_data))
+        
+        return jsonify(leaderboard_data), 200
     return jsonify({"error": "Database connection failed"}), 500
 
 def init_db():
