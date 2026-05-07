@@ -1,4 +1,4 @@
-from flask import request
+from flask import request, render_template
 from flask import Flask, jsonify
 import psycopg2
 import os
@@ -84,6 +84,21 @@ def get_leaderboard():
         
         return jsonify(leaderboard_data), 200
     return jsonify({"error": "Database connection failed"}), 500
+
+@app.route('/admin')
+def admin_dashboard():
+    conn = get_db_connection()
+    players = []
+    if conn:
+        cur = conn.cursor()
+        # Get all players to show in the admin panel
+        cur.execute("SELECT player_name, score, level FROM player_stats ORDER BY score DESC")
+        rows = cur.fetchall()
+        players = [{"player_name": row[0], "score": row[1], "level": row[2]} for row in rows]
+        cur.close()
+        conn.close()
+    
+    return render_template('admin.html', players=players)
 
 def init_db():
     conn = get_db_connection()
